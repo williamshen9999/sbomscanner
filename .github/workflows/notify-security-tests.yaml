@@ -1,0 +1,20 @@
+name: Notify Security Tests
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Security Tests Dispatch
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          gh api repos/neuvector/security-tests/dispatches \
+            --method POST \
+            -f event_type='upstream-change' \
+            -f client_payload[sha]="${{ github.sha }}" \
+            -f client_payload[commit_msg]="${{ github.event.head_commit.message }}"
