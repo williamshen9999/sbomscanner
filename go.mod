@@ -6,6 +6,7 @@ require (
 	github.com/aquasecurity/trivy v0.69.0
 	github.com/aquasecurity/trivy-db v0.0.0-20260121110422-b8dd3abe2347
 	github.com/avast/retry-go/v4 v4.7.0
+	github.com/avast/retry-go/v5 v5.0.0
 	github.com/aws/smithy-go v1.24.0
 	github.com/docker/cli v29.2.1+incompatible
 	github.com/docker/go-units v0.5.0
@@ -187,7 +188,7 @@ require (
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.6.2 // indirect
-	github.com/go-git/go-git/v5 v5.16.4 // indirect
+	github.com/go-git/go-git/v5 v5.16.5 // indirect
 	github.com/go-gorp/gorp/v3 v3.1.0 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
