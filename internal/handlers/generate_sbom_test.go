@@ -2,12 +2,20 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
+	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -597,7 +605,11 @@ func TestGenerateSBOMHandler_Handle_PrivateRegistry(t *testing.T) {
 	singleArchRef := name.MustParseReference(imageRefSingleArch)
 	testPrivateRegistry, err := runTestRegistry(t.Context(), []name.Reference{
 		singleArchRef,
-	}, true)
+	}, testRegistryOptions{
+		Private: true,
+		Cert:    "",
+		Key:     "",
+	})
 	require.NoError(t, err)
 	defer testPrivateRegistry.Terminate(t.Context())
 
@@ -725,4 +737,208 @@ func TestGenerateSBOMHandler_Handle_PrivateRegistry(t *testing.T) {
 
 	err = handler.Handle(t.Context(), &testMessage{data: message})
 	require.NoError(t, err)
+}
+
+func TestGenerateSBOMHandler_Handle_Certificates(t *testing.T) {
+	certContent, keyContent := generateSelfSignedCert(t)
+
+	// Create temporary files for certificate and key
+	tmpCertFile, err := os.CreateTemp(t.TempDir(), "registry-cert-*.crt")
+	require.NoError(t, err)
+	defer os.Remove(tmpCertFile.Name())
+
+	_, err = tmpCertFile.Write(certContent)
+	require.NoError(t, err)
+	tmpCertFile.Close()
+	certFile := tmpCertFile.Name()
+
+	tmpKeyFile, err := os.CreateTemp(t.TempDir(), "registry-key-*.key")
+	require.NoError(t, err)
+	defer os.Remove(tmpKeyFile.Name())
+
+	_, err = tmpKeyFile.Write(keyContent)
+	require.NoError(t, err)
+	tmpKeyFile.Close()
+	keyFile := tmpKeyFile.Name()
+
+	// create a different certificate to test the wrong CA bundle case
+	wrongCertContent, _ := generateSelfSignedCert(t)
+
+	// Start registry once with certificates
+	singleArchRef := name.MustParseReference(imageRefSingleArch)
+	testRegistry, err := runTestRegistry(t.Context(), []name.Reference{
+		singleArchRef,
+	}, testRegistryOptions{
+		Private: false,
+		Cert:    certFile,
+		Key:     keyFile,
+	})
+	require.NoError(t, err)
+	defer testRegistry.Terminate(t.Context())
+
+	testCases := []struct {
+		name         string
+		registryName string
+		registrySpec v1alpha1.RegistrySpec
+		scanJobName  string
+		scanJobUID   string
+	}{
+		{
+			name:         "with CA bundle",
+			registryName: "test-ca-registry",
+			registrySpec: v1alpha1.RegistrySpec{
+				URI:      testRegistry.RegistryName,
+				CABundle: string(certContent),
+			},
+			scanJobName: "test-scanjob-ca",
+			scanJobUID:  "test-scanjob-ca-uid",
+		},
+		{
+			name:         "insecure",
+			registryName: "test-insecure-registry",
+			registrySpec: v1alpha1.RegistrySpec{
+				URI:      testRegistry.RegistryName,
+				Insecure: true,
+				CABundle: string(wrongCertContent),
+			},
+			scanJobName: "test-scanjob-insecure",
+			scanJobUID:  "test-scanjob-insecure-uid",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := &v1alpha1.Registry{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tc.registryName,
+					Namespace: "default",
+				},
+				Spec: tc.registrySpec,
+			}
+			registryData, err := json.Marshal(registry)
+			require.NoError(t, err)
+
+			image := &storagev1alpha1.Image{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      computeImageUID(fmt.Sprintf("%s/%s", testRegistry.RegistryName, singleArchRef.Context().RepositoryStr()), singleArchRef.Identifier(), imageDigestSingleArch),
+					Namespace: "default",
+					UID:       "image-uid",
+				},
+				ImageMetadata: storagev1alpha1.ImageMetadata{
+					Registry:    tc.registryName,
+					RegistryURI: testRegistry.RegistryName,
+					Repository:  singleArchRef.Context().RepositoryStr(),
+					Tag:         singleArchRef.Identifier(),
+					Platform:    "linux/amd64",
+					Digest:      imageDigestSingleArch,
+				},
+			}
+
+			scanJob := &v1alpha1.ScanJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tc.scanJobName,
+					Namespace: "default",
+					UID:       types.UID(tc.scanJobUID),
+					Annotations: map[string]string{
+						v1alpha1.AnnotationScanJobRegistryKey: string(registryData),
+					},
+				},
+				Spec: v1alpha1.ScanJobSpec{
+					Registry: tc.registryName,
+				},
+			}
+
+			scheme := scheme.Scheme
+			err = storagev1alpha1.AddToScheme(scheme)
+			require.NoError(t, err)
+			err = v1alpha1.AddToScheme(scheme)
+			require.NoError(t, err)
+			err = corev1.AddToScheme(scheme)
+			require.NoError(t, err)
+			k8sClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(image, registry, scanJob).
+				WithIndex(&storagev1alpha1.SBOM{}, storagev1alpha1.IndexImageMetadataDigest, func(obj client.Object) []string {
+					sbom, ok := obj.(*storagev1alpha1.SBOM)
+					if !ok {
+						return nil
+					}
+					return []string{sbom.GetImageMetadata().Digest}
+				}).
+				Build()
+
+			publisher := messagingMocks.NewMockPublisher(t)
+
+			expectedScanMessage, err := json.Marshal(&ScanSBOMMessage{
+				BaseMessage: BaseMessage{
+					ScanJob: ObjectRef{
+						Name:      scanJob.Name,
+						Namespace: scanJob.Namespace,
+						UID:       string(scanJob.UID),
+					},
+				},
+				SBOM: ObjectRef{
+					Name:      image.Name,
+					Namespace: image.Namespace,
+				},
+			})
+			require.NoError(t, err)
+
+			publisher.On("Publish",
+				mock.Anything,
+				ScanSBOMSubject,
+				fmt.Sprintf("scanSBOM/%s/%s", scanJob.UID, image.Name),
+				expectedScanMessage,
+			).Return(nil).Once()
+
+			handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, slog.Default())
+
+			message, err := json.Marshal(&GenerateSBOMMessage{
+				BaseMessage: BaseMessage{
+					ScanJob: ObjectRef{
+						Name:      scanJob.Name,
+						Namespace: scanJob.Namespace,
+						UID:       string(scanJob.UID),
+					},
+				},
+				Image: ObjectRef{
+					Name:      image.Name,
+					Namespace: image.Namespace,
+				},
+			})
+			require.NoError(t, err)
+
+			err = handler.Handle(t.Context(), &testMessage{data: message})
+			require.NoError(t, err)
+		})
+	}
+}
+
+func generateSelfSignedCert(t *testing.T) ([]byte, []byte) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	now := time.Now()
+	serialNumber, err := rand.Int(rand.Reader, big.NewInt(1<<62))
+	require.NoError(t, err)
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Test Registry"},
+		},
+		NotBefore:   now.Add(-time.Hour),
+		NotAfter:    now.Add(24 * time.Hour),
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:    []string{"localhost"},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	require.NoError(t, err)
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+	return certPEM, keyPEM
 }

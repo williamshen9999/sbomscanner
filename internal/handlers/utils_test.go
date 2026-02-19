@@ -2,7 +2,12 @@ package handlers
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"net/http"
+	"os"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -10,6 +15,7 @@ import (
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/registry"
+	"github.com/testcontainers/testcontainers-go/wait"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -73,17 +79,39 @@ func (k *staticKeychain) Resolve(target authn.Resource) (authn.Authenticator, er
 	return authn.Anonymous, nil
 }
 
-// runTestRegistry starts a test container registry, optionally with authentication, and pushes the provided test images to it.
-func runTestRegistry(ctx context.Context, testImages []name.Reference, private bool) (*registry.RegistryContainer, error) {
-	opts := []testcontainers.ContainerCustomizer{}
-	if private {
-		opts = append(opts, registry.WithHtpasswd(htpasswd))
+type testRegistryOptions struct {
+	Private bool
+	Cert    string
+	Key     string
+}
+
+// runTestRegistry starts a test container registry, optionally with authentication and TLS certs, and pushes the provided test images to it.
+func runTestRegistry(ctx context.Context, testImages []name.Reference, opts testRegistryOptions) (*registry.RegistryContainer, error) {
+	options := []testcontainers.ContainerCustomizer{}
+	if opts.Private {
+		options = append(options, registry.WithHtpasswd(htpasswd))
+	}
+
+	// Configure TLS if cert and key are provided
+	var craneOpts []crane.Option
+
+	if opts.Cert != "" && opts.Key != "" {
+		// Mount certificate files into the container
+		// and set environment variables for the registry to use them
+		options = append(options,
+			withCertificateAndKeyFiles(opts.Cert, opts.Key)...,
+		)
+
+		transport := &http.Transport{
+			TLSClientConfig: newTLSConfigWithCustomCA(opts.Cert),
+		}
+		craneOpts = append(craneOpts, crane.WithTransport(transport))
 	}
 
 	registryTestcontainer, err := registry.Run(
 		ctx,
 		registry.DefaultImage,
-		opts...,
+		options...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to start registry testcontainer: %w", err)
@@ -95,7 +123,7 @@ func runTestRegistry(ctx context.Context, testImages []name.Reference, private b
 	}
 
 	keychains := []authn.Keychain{authn.DefaultKeychain}
-	if private {
+	if opts.Private {
 		_, err := registry.SetDockerAuthConfig(registryHostAddress, authUser, authPass)
 		if err != nil {
 			return nil, fmt.Errorf("unable to set docker auth config: %w", err)
@@ -111,11 +139,14 @@ func runTestRegistry(ctx context.Context, testImages []name.Reference, private b
 		})
 	}
 
+	// Add auth to crane options
+	craneOpts = append(craneOpts, crane.WithAuthFromKeychain(authn.NewMultiKeychain(keychains...)))
+
 	for _, image := range testImages {
 		localImageRef := fmt.Sprintf("%s/%s:%s", registryHostAddress, image.Context().RepositoryStr(), image.Identifier())
 
 		// Use crane.Copy to preserve multi-arch manifests
-		if err := crane.Copy(image.String(), localImageRef, crane.WithAuthFromKeychain(authn.NewMultiKeychain(keychains...))); err != nil {
+		if err := crane.Copy(image.String(), localImageRef, craneOpts...); err != nil {
 			return nil, fmt.Errorf("unable to copy image: %w", err)
 		}
 	}
@@ -139,5 +170,51 @@ func imageFactory(registryURI, repository, tag, platform, digest, indexDigest st
 			Digest:      digest,
 			IndexDigest: indexDigest,
 		},
+	}
+}
+
+func newTLSConfigWithCustomCA(cert string) *tls.Config {
+	// Start with the system's CA pool
+	certPool, err := x509.SystemCertPool()
+	if err != nil {
+		// If we can't get the system pool, create a new one
+		certPool = x509.NewCertPool()
+	}
+
+	// Add our self-signed certificate to the pool
+	// so that crane can trust the registry when pushing images
+	certContent, err := os.ReadFile(cert)
+	if err != nil {
+		return &tls.Config{}
+	}
+	certPool.AppendCertsFromPEM(certContent)
+	tlsConfig := &tls.Config{
+		RootCAs: certPool,
+	}
+
+	return tlsConfig
+}
+
+func withCertificateAndKeyFiles(certFile, keyFile string) []testcontainers.ContainerCustomizer {
+	return []testcontainers.ContainerCustomizer{
+		testcontainers.WithFiles(
+			testcontainers.ContainerFile{
+				HostFilePath:      certFile,
+				ContainerFilePath: "/certs/registry.crt",
+				FileMode:          0644,
+			},
+			testcontainers.ContainerFile{
+				HostFilePath:      keyFile,
+				ContainerFilePath: "/certs/registry.key",
+				FileMode:          0600,
+			},
+		),
+		testcontainers.WithEnv(map[string]string{
+			"REGISTRY_HTTP_TLS_CERTIFICATE": "/certs/registry.crt",
+			"REGISTRY_HTTP_TLS_KEY":         "/certs/registry.key",
+		}),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("listening on").WithStartupTimeout(60 * time.Second),
+		),
 	}
 }

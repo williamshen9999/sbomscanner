@@ -49,13 +49,18 @@ func TestCreateCatalogHandler_Handle(t *testing.T) {
 		multiArchWithUnknownPlatformRef,
 		helmChartRef,
 		kubewardenPolicyRef,
-	}, false)
+	},
+		testRegistryOptions{
+			Private: false,
+		})
 	require.NoError(t, err)
 	defer testRegistry.Terminate(t.Context())
 
 	testPrivateRegistry, err := runTestRegistry(t.Context(), []name.Reference{
 		singleArchRef,
-	}, true)
+	}, testRegistryOptions{
+		Private: true,
+	})
 	require.NoError(t, err)
 	defer testPrivateRegistry.Terminate(t.Context())
 
