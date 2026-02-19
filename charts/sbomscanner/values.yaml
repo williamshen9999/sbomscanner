@@ -113,24 +113,27 @@ nats:
   container:
     merge:
       securityContext:
-        readOnlyRootFilesystem: true
-        runAsNonRoot: true
-        runAsUser: 65532
-        seccompProfile:
-            type: RuntimeDefault
         allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
         capabilities:
             drop:
             - "ALL"
   reloader:
     merge:
       securityContext:
-        readOnlyRootFilesystem: true
-        runAsNonRoot: true
-        runAsUser: 65532
-        seccompProfile:
-            type: RuntimeDefault
         allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
         capabilities:
             drop:
             - "ALL"
+  podTemplate:
+    merge:
+      spec:
+        securityContext:
+          runAsUser: 1001
+          runAsGroup: 1001
+          runAsNonRoot: true
+          fsGroup: 1001
+          fsGroupChangePolicy: OnRootMismatch
+          seccompProfile:
+            type: RuntimeDefault
