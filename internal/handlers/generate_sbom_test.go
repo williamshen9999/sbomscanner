@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/kubewarden/sbomscanner/api"
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 	"github.com/kubewarden/sbomscanner/api/v1alpha1"
 	messagingMocks "github.com/kubewarden/sbomscanner/internal/messaging/mocks"
@@ -177,7 +178,7 @@ func testGenerateSBOM(t *testing.T, platform, sha256, expectedSPDXJSON string) {
 		expectedScanMessage,
 	).Return(nil).Once()
 
-	handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, slog.Default())
+	handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, "sbomscanner", slog.Default())
 
 	message, err := json.Marshal(&GenerateSBOMMessage{
 		BaseMessage: BaseMessage{
@@ -206,6 +207,7 @@ func testGenerateSBOM(t *testing.T, platform, sha256, expectedSPDXJSON string) {
 
 	assert.Equal(t, image.ImageMetadata, sbom.ImageMetadata)
 	assert.Equal(t, image.UID, sbom.GetOwnerReferences()[0].UID)
+	assert.Empty(t, sbom.Labels[api.LabelWorkloadScanKey], "workloadscan label should not be set when registry doesn't have it")
 
 	generatedSPDX := &spdx.Document{}
 	err = json.Unmarshal(sbom.SPDX.Raw, generatedSPDX)
@@ -264,6 +266,9 @@ func TestGenerateSBOMHandler_Handle_ReuseSBOMWithSameDigest(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-registry",
 			Namespace: "default",
+			Labels: map[string]string{
+				api.LabelWorkloadScanKey: api.LabelWorkloadScanValue,
+			},
 		},
 		Spec: v1alpha1.RegistrySpec{
 			URI: "test.io",
@@ -327,7 +332,7 @@ func TestGenerateSBOMHandler_Handle_ReuseSBOMWithSameDigest(t *testing.T) {
 		expectedScanMessage,
 	).Return(nil).Once()
 
-	handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, slog.Default())
+	handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, "sbomscanner", slog.Default())
 
 	message, err := json.Marshal(&GenerateSBOMMessage{
 		BaseMessage: BaseMessage{
@@ -356,6 +361,7 @@ func TestGenerateSBOMHandler_Handle_ReuseSBOMWithSameDigest(t *testing.T) {
 	assert.Equal(t, expectedSPDXContent, newSBOM.SPDX.Raw, "SPDX content should be reused from existing SBOM")
 	assert.Equal(t, newImage.ImageMetadata, newSBOM.ImageMetadata)
 	assert.Equal(t, newImage.UID, newSBOM.GetOwnerReferences()[0].UID)
+	assert.Equal(t, api.LabelWorkloadScanValue, newSBOM.Labels[api.LabelWorkloadScanKey], "workloadscan label should be propagated from registry")
 }
 
 func TestGenerateSBOMHandler_Handle_StopProcessing(t *testing.T) {
@@ -455,7 +461,7 @@ func TestGenerateSBOMHandler_Handle_StopProcessing(t *testing.T) {
 			publisher := messagingMocks.NewMockPublisher(t)
 			// Publisher should not be called since we exit early
 
-			handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, slog.Default())
+			handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, "sbomscanner", slog.Default())
 
 			message, err := json.Marshal(&GenerateSBOMMessage{
 				BaseMessage: BaseMessage{
@@ -580,7 +586,7 @@ func TestGenerateSBOMHandler_Handle_ExistingSBOM(t *testing.T) {
 		expectedScanMessage,
 	).Return(nil).Once()
 
-	handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, slog.Default())
+	handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, "sbomscanner", slog.Default())
 
 	message, err := json.Marshal(&GenerateSBOMMessage{
 		BaseMessage: BaseMessage{
@@ -718,7 +724,7 @@ func TestGenerateSBOMHandler_Handle_PrivateRegistry(t *testing.T) {
 		expectedScanMessage,
 	).Return(nil).Once()
 
-	handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, slog.Default())
+	handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, "sbomscanner", slog.Default())
 
 	message, err := json.Marshal(&GenerateSBOMMessage{
 		BaseMessage: BaseMessage{
@@ -891,7 +897,7 @@ func TestGenerateSBOMHandler_Handle_Certificates(t *testing.T) {
 				expectedScanMessage,
 			).Return(nil).Once()
 
-			handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, slog.Default())
+			handler := NewGenerateSBOMHandler(k8sClient, scheme, "/tmp", testTrivyJavaDBRepository, publisher, "sbomscanner", slog.Default())
 
 			message, err := json.Marshal(&GenerateSBOMMessage{
 				BaseMessage: BaseMessage{

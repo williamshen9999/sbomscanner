@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -14,19 +13,16 @@ import (
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
-	"sigs.k8s.io/e2e-framework/third_party/helm"
 
 	"github.com/kubewarden/sbomscanner/api"
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 	v1alpha1 "github.com/kubewarden/sbomscanner/api/v1alpha1"
 )
 
-func TestRegistryCreation(t *testing.T) {
-	releaseName := "sbomscanner"
+func TestRegistryScan(t *testing.T) {
 	registryName := "test-registry"
 	registryURI := "ghcr.io"
 	registryRepository := "kubewarden/sbomscanner/test-assets/golang"
-	chartPath := "../../charts/sbomscanner"
 	totalImages := 7 // Current number of images in the test-assets/golang directory
 
 	labelSelector := labels.FormatLabels(
@@ -34,31 +30,6 @@ func TestRegistryCreation(t *testing.T) {
 	)
 
 	f := features.New("Scan a Registry").
-		Setup(func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			manager := helm.New(cfg.KubeconfigFile())
-			err := manager.RunInstall(helm.WithName(releaseName),
-				helm.WithNamespace(cfg.Namespace()),
-				helm.WithChart(chartPath),
-				helm.WithWait(),
-				helm.WithArgs("--set", "controller.image.tag=latest",
-					"--set", "storage.image.tag=latest",
-					"--set", "worker.image.tag=latest",
-					"--set", "controller.logLevel=debug",
-					"--set", "storage.logLevel=debug",
-					"--set", "worker.logLevel=debug",
-				),
-				helm.WithTimeout("3m"))
-
-			require.NoError(t, err, "sbomscanner helm chart is not installed correctly")
-
-			err = storagev1alpha1.AddToScheme(cfg.Client().Resources(cfg.Namespace()).GetScheme())
-			require.NoError(t, err)
-
-			err = v1alpha1.AddToScheme(cfg.Client().Resources(cfg.Namespace()).GetScheme())
-			require.NoError(t, err)
-
-			return ctx
-		}).
 		Assess("Create a Registry", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 			registry := &v1alpha1.Registry{
 				ObjectMeta: metav1.ObjectMeta{
@@ -203,15 +174,6 @@ func TestRegistryCreation(t *testing.T) {
 			}))
 			require.NoError(t, err)
 
-			return ctx
-		}).
-		Teardown(func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			manager := helm.New(cfg.KubeconfigFile())
-			err := manager.RunUninstall(
-				helm.WithName(releaseName),
-				helm.WithNamespace(cfg.Namespace()),
-			)
-			assert.NoError(t, err, "sbomscanner helm chart is not deleted correctly")
 			return ctx
 		})
 

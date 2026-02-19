@@ -95,6 +95,28 @@ spec:
             type: array
           metadata:
             type: object
+          status:
+            description: Status of the image
+            properties:
+              workloadScanReports:
+                description: WorkloadScanReports is the list of workloads referencing
+                  this image
+                items:
+                  description: ImageWorkloadScanReports identifies a workload that
+                    references this image
+                  properties:
+                    name:
+                      description: Name of the WorkloadScanReport
+                      type: string
+                    namespace:
+                      description: Namespace of the WorkloadScanReport
+                      type: string
+                  required:
+                  - name
+                  - namespace
+                  type: object
+                type: array
+            type: object
         required:
         - imageMetadata
         type: object

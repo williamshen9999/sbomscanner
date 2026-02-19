@@ -54,6 +54,14 @@
                             }
                         }
                     }
+                },
+                "workloadScan": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
                 }
             }
         },

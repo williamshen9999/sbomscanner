@@ -4,7 +4,18 @@
 | Start Date   | 2025-01-18                                                 |
 | Category     | Architecture                                               |
 | RFC PR       | [#770](https://github.com/kubewarden/sbomscanner/pull/770) |
-| State        | **ACCEPTED**                                               |
+| State        | **REJECTED**                                               |
+
+# Rejection rationale
+
+This RFC was rejected after further evaluation. Storage-level deduplication adds significant complexity without providing sufficient benefit in practice:
+
+- **Scanning is fast**: Vulnerability scanning operates on SBOMs, not on container images directly. Rescanning an SBOM against an updated vulnerability database is a lightweight operation, so avoiding duplicate scans offers minimal time savings.
+- **Rescanning is unavoidable**: As the vulnerability database evolves, all SBOMs must be rescanned regardless. Deduplication does not eliminate scanning work, it only avoids it temporarily until the next database update.
+- **SBOM deduplication is handled programmatically**: For SBOM generation, which is the expensive operation, deduplication is implemented at the application level by the worker handlers without requiring storage-level support.
+- **Race conditions**: The split-table model introduces concurrency scenarios (concurrent writes to the same sha256, conflict resolution, transactional reference counting) that add operational risk. The only concrete benefit would be saving storage space, which does not justify the added complexity.
+
+However, the repository pattern refactor proposed as a pre-requisite in this RFC was carried forward. The generic `Repository` interface and the decoupling of storage strategies from the Kubernetes `storage.Interface` proved valuable for implementing the WorkloadScan feature (see [RFC 0007](0007_workload_scan.md)), which required a custom `WorkloadScanReportRepository` with computed fields at read time.
 
 # Summary
 

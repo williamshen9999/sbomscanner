@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
-	"time"
 
 	"github.com/go-logr/logr"
 
@@ -14,8 +12,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	"github.com/kubewarden/sbomscanner/api"
 	"github.com/kubewarden/sbomscanner/api/v1alpha1"
-	"github.com/kubewarden/sbomscanner/internal/cel"
 )
 
 const (
@@ -25,10 +23,12 @@ const (
 var availableCatalogTypes = []string{v1alpha1.CatalogTypeNoCatalog, v1alpha1.CatalogTypeOCIDistribution}
 
 // SetupRegistryWebhookWithManager registers the webhook for Registry in the manager.
-func SetupRegistryWebhookWithManager(mgr ctrl.Manager) error {
+func SetupRegistryWebhookWithManager(mgr ctrl.Manager, serviceAccountNamespace, serviceAccountName string) error {
 	err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Registry{}).
 		WithValidator(&RegistryCustomValidator{
-			logger: mgr.GetLogger().WithName("registry_validator"),
+			serviceAccountNamespace: serviceAccountNamespace,
+			serviceAccountName:      serviceAccountName,
+			logger:                  mgr.GetLogger().WithName("registry_validator"),
 		}).
 		WithDefaulter(&RegistryCustomDefaulter{
 			logger: mgr.GetLogger().WithName("registry_defaulter"),
@@ -59,17 +59,23 @@ func (d *RegistryCustomDefaulter) Default(_ context.Context, registry *v1alpha1.
 	return nil
 }
 
-// +kubebuilder:webhook:path=/validate-sbomscanner-kubewarden-io-v1alpha1-registry,mutating=false,failurePolicy=fail,sideEffects=None,groups=sbomscanner.kubewarden.io,resources=registries,verbs=create;update,versions=v1alpha1,name=vregistry.sbomscanner.kubewarden.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-sbomscanner-kubewarden-io-v1alpha1-registry,mutating=false,failurePolicy=fail,sideEffects=None,groups=sbomscanner.kubewarden.io,resources=registries,verbs=create;update;delete,versions=v1alpha1,name=vregistry.sbomscanner.kubewarden.io,admissionReviewVersions=v1
 
 type RegistryCustomValidator struct {
-	logger logr.Logger
+	serviceAccountNamespace string
+	serviceAccountName      string
+	logger                  logr.Logger
 }
 
 var _ admission.Validator[*v1alpha1.Registry] = &RegistryCustomValidator{}
 
 // ValidateCreate implements admission.Validator so a webhook will be registered for the type Registry.
-func (v *RegistryCustomValidator) ValidateCreate(_ context.Context, registry *v1alpha1.Registry) (admission.Warnings, error) {
+func (v *RegistryCustomValidator) ValidateCreate(ctx context.Context, registry *v1alpha1.Registry) (admission.Warnings, error) {
 	v.logger.Info("Validation for Registry upon creation", "name", registry.GetName())
+
+	if err := v.validatedManagedRegistry(ctx, registry); err != nil {
+		return nil, err
+	}
 
 	allErrs := validateRegistry(registry)
 
@@ -85,8 +91,12 @@ func (v *RegistryCustomValidator) ValidateCreate(_ context.Context, registry *v1
 }
 
 // ValidateUpdate implements admission.Validator so a webhook will be registered for the type Registry.
-func (v *RegistryCustomValidator) ValidateUpdate(_ context.Context, _, registry *v1alpha1.Registry) (admission.Warnings, error) {
+func (v *RegistryCustomValidator) ValidateUpdate(ctx context.Context, oldRegistry, registry *v1alpha1.Registry) (admission.Warnings, error) {
 	v.logger.Info("Validation for Registry upon update", "name", registry.GetName())
+
+	if err := v.validatedManagedRegistry(ctx, oldRegistry); err != nil {
+		return nil, err
+	}
 
 	allErrs := validateRegistry(registry)
 
@@ -102,93 +112,51 @@ func (v *RegistryCustomValidator) ValidateUpdate(_ context.Context, _, registry 
 }
 
 // ValidateDelete implements admission.Validator so a webhook will be registered for the type Registry.
-func (v *RegistryCustomValidator) ValidateDelete(_ context.Context, registry *v1alpha1.Registry) (admission.Warnings, error) {
+func (v *RegistryCustomValidator) ValidateDelete(ctx context.Context, registry *v1alpha1.Registry) (admission.Warnings, error) {
 	v.logger.Info("Validation for Registry upon deletion", "name", registry.GetName())
+
+	if err := v.validatedManagedRegistry(ctx, registry); err != nil {
+		return nil, err
+	}
 
 	return nil, nil
 }
 
-func validateScanInterval(registry *v1alpha1.Registry) *field.Error {
-	if registry.Spec.ScanInterval == nil {
+// validatedManagedRegistry ensures that only the designated service account can modify managed Registry resources.
+func (v *RegistryCustomValidator) validatedManagedRegistry(ctx context.Context, registry *v1alpha1.Registry) error {
+	managedLabel := registry.GetLabels()[api.LabelManagedByKey]
+	if managedLabel != api.LabelManagedByValue {
 		return nil
 	}
 
-	if registry.Spec.ScanInterval.Duration < time.Minute {
-		fieldPath := field.NewPath("spec").Child("scanInterval")
-		return field.Invalid(fieldPath, registry.Spec.ScanInterval, "scanInterval must be at least 1 minute")
-	}
-
-	return nil
-}
-
-func validateCatalogType(registry *v1alpha1.Registry) *field.Error {
-	// CatalogType is set to default in the defaulter.
-	if registry.Spec.CatalogType == "" {
-		return nil
-	}
-
-	if !slices.Contains(availableCatalogTypes, registry.Spec.CatalogType) {
-		fieldPath := field.NewPath("spec").Child("catalogType")
-		return field.Invalid(fieldPath, registry.Spec.CatalogType, fmt.Sprintf("%s is not a valid CatalogType", registry.Spec.CatalogType))
-	}
-
-	return nil
-}
-
-func validateRepositories(registry *v1alpha1.Registry) field.ErrorList {
-	var allErrs field.ErrorList
-
-	fieldPath := field.NewPath("spec").Child("repositories")
-	if registry.Spec.CatalogType == v1alpha1.CatalogTypeNoCatalog && len(registry.Spec.Repositories) == 0 {
-		allErrs = append(allErrs, field.Invalid(fieldPath, registry.Spec.Repositories, "repositories must be explicitly provided when catalogType is NoCatalog"))
-	}
-
-	tagEvaluator, err := cel.NewTagEvaluator()
+	request, err := admission.RequestFromContext(ctx)
 	if err != nil {
-		allErrs = append(allErrs, field.InternalError(fieldPath, errors.New("failed to create CEL tag evaluator")))
-		return allErrs
+		return apierrors.NewInternalError(errors.New("unable to retrieve admission request from context"))
 	}
 
-	for i, repo := range registry.Spec.Repositories {
-		for j, mc := range repo.MatchConditions {
-			if err := tagEvaluator.Validate(mc.Expression); err != nil {
-				allErrs = append(allErrs, field.Invalid(fieldPath.Index(i).Child("matchConditions").Index(j).Child("expression"), mc.Expression, err.Error()))
-			}
-		}
+	allowedUsername := fmt.Sprintf("system:serviceaccount:%s:%s", v.serviceAccountNamespace, v.serviceAccountName)
+	if request.UserInfo.Username != allowedUsername {
+		return apierrors.NewForbidden(
+			v1alpha1.GroupVersion.WithResource("registries").GroupResource(),
+			registry.Name,
+			errors.New("only the designated service account can modify managed Registry resources"),
+		)
 	}
 
-	return allErrs
-}
-
-func validatePlatforms(registry *v1alpha1.Registry) field.ErrorList {
-	var allErrs field.ErrorList
-
-	if registry.Spec.Platforms == nil {
-		return allErrs
-	}
-
-	fieldPath := field.NewPath("spec").Child("platforms")
-
-	for i, platform := range registry.Spec.Platforms {
-		if err := validatePlatform(platform); err != nil {
-			allErrs = append(allErrs, field.Invalid(fieldPath.Index(i), platform, err.Error()))
-		}
-	}
-
-	return allErrs
+	return nil
 }
 
 func validateRegistry(registry *v1alpha1.Registry) field.ErrorList {
 	var allErrs field.ErrorList
 
-	if err := validateScanInterval(registry); err != nil {
+	if err := validateScanInterval(registry.Spec.ScanInterval); err != nil {
 		allErrs = append(allErrs, err)
 	}
-	if err := validateCatalogType(registry); err != nil {
+	if err := validateCatalogType(registry.Spec.CatalogType); err != nil {
 		allErrs = append(allErrs, err)
 	}
-	allErrs = append(allErrs, validateRepositories(registry)...)
-	allErrs = append(allErrs, validatePlatforms(registry)...)
+	allErrs = append(allErrs, validateRepositories(registry.Spec.Repositories, registry.Spec.CatalogType)...)
+	allErrs = append(allErrs, validatePlatforms(registry.Spec.Platforms)...)
 
 	return allErrs
 }

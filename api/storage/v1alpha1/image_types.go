@@ -32,6 +32,22 @@ type Image struct {
 	ImageMetadata `json:"imageMetadata" protobuf:"bytes,2,req,name=imageMetadata"`
 	// List of the layers that make the image
 	Layers []ImageLayer `json:"layers,omitempty" protobuf:"bytes,3,rep,name=layers"`
+	// Status of the image
+	Status ImageStatus `json:"status,omitempty" protobuf:"bytes,4,opt,name=status"`
+}
+
+// ImageStatus contains the observed state of the Image
+type ImageStatus struct {
+	// WorkloadScanReports is the list of workloads referencing this image
+	WorkloadScanReports []ImageWorkloadScanReports `json:"workloadScanReports,omitempty" protobuf:"bytes,1,rep,name=workloadScanReports"`
+}
+
+// ImageWorkloadScanReports identifies a workload that references this image
+type ImageWorkloadScanReports struct {
+	// Name of the WorkloadScanReport
+	Name string `json:"name" protobuf:"bytes,1,req,name=name"`
+	// Namespace of the WorkloadScanReport
+	Namespace string `json:"namespace" protobuf:"bytes,2,req,name=namespace"`
 }
 
 // ImageLayer define a layer part of an OCI Image

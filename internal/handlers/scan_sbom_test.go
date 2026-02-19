@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubewarden/sbomscanner/api"
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 	"github.com/kubewarden/sbomscanner/api/v1alpha1"
 	"github.com/kubewarden/sbomscanner/pkg/generated/clientset/versioned/scheme"
@@ -123,11 +124,29 @@ func testScanSBOM(t *testing.T, cacheDir, platform, sourceSBOMJSON, expectedRepo
 	spdxData, err := os.ReadFile(sourceSBOMJSON)
 	require.NoError(t, err, "failed to read source SBOM file %s", sourceSBOMJSON)
 
+	registry := &v1alpha1.Registry{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-registry",
+			Namespace: "default",
+			Labels: map[string]string{
+				api.LabelWorkloadScanKey: api.LabelWorkloadScanValue,
+			},
+		},
+		Spec: v1alpha1.RegistrySpec{
+			URI: "test.io",
+		},
+	}
+	registryData, err := json.Marshal(registry)
+	require.NoError(t, err)
+
 	scanJob := &v1alpha1.ScanJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-scanjob",
 			Namespace: "default",
 			UID:       "test-scanjob-uid",
+			Annotations: map[string]string{
+				v1alpha1.AnnotationScanJobRegistryKey: string(registryData),
+			},
 		},
 		Spec: v1alpha1.ScanJobSpec{
 			Registry: "test-registry",
@@ -194,6 +213,7 @@ func testScanSBOM(t *testing.T, cacheDir, platform, sourceSBOMJSON, expectedRepo
 	assert.Equal(t, sbom.GetImageMetadata(), vulnerabilityReport.GetImageMetadata())
 	assert.Equal(t, sbom.UID, vulnerabilityReport.GetOwnerReferences()[0].UID)
 	assert.Equal(t, string(scanJob.UID), vulnerabilityReport.Labels[v1alpha1.LabelScanJobUIDKey])
+	assert.Equal(t, api.LabelWorkloadScanValue, vulnerabilityReport.Labels[api.LabelWorkloadScanKey], "workloadscan label should be propagated from registry")
 
 	report := &vulnerabilityReport.Report
 	require.NotEmpty(t, report)
@@ -228,11 +248,26 @@ func TestScanSBOMHandler_Handle_StopProcessing(t *testing.T) {
 		Items: []v1alpha1.VEXHub{},
 	}
 
+	stopRegistry := &v1alpha1.Registry{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-registry",
+			Namespace: "default",
+		},
+		Spec: v1alpha1.RegistrySpec{
+			URI: "test.io",
+		},
+	}
+	stopRegistryData, err := json.Marshal(stopRegistry)
+	require.NoError(t, err)
+
 	scanJob := &v1alpha1.ScanJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-scanjob",
 			Namespace: "default",
 			UID:       "test-scanjob-uid",
+			Annotations: map[string]string{
+				v1alpha1.AnnotationScanJobRegistryKey: string(stopRegistryData),
+			},
 		},
 		Spec: v1alpha1.ScanJobSpec{
 			Registry: "test-registry",

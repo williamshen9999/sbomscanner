@@ -6,6 +6,9 @@ import (
 	"os"
 	"testing"
 
+	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
+	"github.com/kubewarden/sbomscanner/api/v1alpha1"
+
 	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/envfuncs"
@@ -23,6 +26,8 @@ var (
 	certManagerNamespace = "cert-manager"
 	certManagerVersion   = "v1.18.2"
 	cnpgNamespace        = "cnpg-system"
+	releaseName          = "sbomscanner"
+	chartPath            = "../../charts/sbomscanner"
 )
 
 func TestMain(m *testing.M) {
@@ -90,11 +95,51 @@ func TestMain(m *testing.M) {
 				return ctx, fmt.Errorf("failed to install cnpg operator: %w", err)
 			}
 
+			// Install SBOMscanner
+			err = manager.RunInstall(helm.WithName(releaseName),
+				helm.WithNamespace(namespace),
+				helm.WithChart(chartPath),
+				helm.WithWait(),
+				helm.WithArgs("--set", "controller.image.tag=latest",
+					"--set", "storage.image.tag=latest",
+					"--set", "worker.image.tag=latest",
+					"--set", "controller.logLevel=debug",
+					"--set", "storage.logLevel=debug",
+					"--set", "worker.logLevel=debug",
+				),
+				helm.WithTimeout("3m"))
+			if err != nil {
+				return ctx, fmt.Errorf("failed to install sbomscanner: %w", err)
+			}
+
+			// Register schemes
+			err = storagev1alpha1.AddToScheme(cfg.Client().Resources(namespace).GetScheme())
+			if err != nil {
+				return ctx, fmt.Errorf("failed to add storage scheme: %w", err)
+			}
+
+			err = v1alpha1.AddToScheme(cfg.Client().Resources(namespace).GetScheme())
+			if err != nil {
+				return ctx, fmt.Errorf("failed to add v1alpha1 scheme: %w", err)
+			}
+
 			return ctx, nil
 		},
 	)
 
 	testenv.Finish(
+		func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
+			manager := helm.New(cfg.KubeconfigFile())
+			err := manager.RunUninstall(
+				helm.WithName(releaseName),
+				helm.WithNamespace(namespace),
+			)
+			if err != nil {
+				return ctx, fmt.Errorf("failed to uninstall sbomscanner: %w", err)
+			}
+
+			return ctx, nil
+		},
 		envfuncs.ExportClusterLogs(kindClusterName, "./logs"),
 		envfuncs.DestroyCluster(kindClusterName),
 	)

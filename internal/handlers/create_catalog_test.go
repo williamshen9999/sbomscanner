@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	"github.com/kubewarden/sbomscanner/api"
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 	"github.com/kubewarden/sbomscanner/api/v1alpha1"
 	registryClient "github.com/kubewarden/sbomscanner/internal/handlers/registry"
@@ -404,7 +405,7 @@ func TestCreateCatalogHandler_Handle(t *testing.T) {
 				mockPublisher.On("Publish", mock.Anything, GenerateSBOMSubject, messageID, expectedMessage).Return(nil).Once()
 			}
 
-			handler := NewCreateCatalogHandler(registryClientFactory, k8sClient, scheme, mockPublisher, slog.Default())
+			handler := NewCreateCatalogHandler(registryClientFactory, k8sClient, scheme, mockPublisher, "sbomscanner", slog.Default())
 
 			message, err := json.Marshal(&CreateCatalogMessage{
 				BaseMessage: BaseMessage{
@@ -634,7 +635,7 @@ func TestCreateCatalogHandler_Handle_StopProcessing(t *testing.T) {
 
 			mockPublisher := messagingMocks.NewMockPublisher(t)
 
-			handler := NewCreateCatalogHandler(registryClient, k8sClientWithInterceptors, scheme, mockPublisher, slog.Default())
+			handler := NewCreateCatalogHandler(registryClient, k8sClientWithInterceptors, scheme, mockPublisher, "sbomscanner", slog.Default())
 
 			message, err := json.Marshal(&CreateCatalogMessage{
 				BaseMessage: BaseMessage{
@@ -710,6 +711,7 @@ func TestCreateCatalogHandler_imageDetailsToImage(t *testing.T) {
 	assert.Equal(t, platform.String(), image.GetImageMetadata().Platform)
 	assert.Equal(t, digest.String(), image.GetImageMetadata().Digest)
 	assert.Equal(t, "test-index-digest", image.GetImageMetadata().IndexDigest)
+	assert.Empty(t, image.Labels[api.LabelWorkloadScanKey], "workloadscan label should not be set when registry doesn't have it")
 
 	assert.Len(t, image.Layers, numberOfLayers)
 	for i := range numberOfLayers {
@@ -726,6 +728,15 @@ func TestCreateCatalogHandler_imageDetailsToImage(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("command-%d", i), string(command))
 	}
+
+	// Test that the workloadscan label is propagated when the registry has it
+	registryWithWorkloadScan := registry.DeepCopy()
+	registryWithWorkloadScan.Labels = map[string]string{
+		api.LabelWorkloadScanKey: api.LabelWorkloadScanValue,
+	}
+	imageWithLabel, err := imageDetailsToImage(ref, details, registryWithWorkloadScan, scheme, "test-index-digest")
+	require.NoError(t, err)
+	assert.Equal(t, api.LabelWorkloadScanValue, imageWithLabel.Labels[api.LabelWorkloadScanKey], "workloadscan label should be propagated from registry")
 }
 
 func buildImageDetails(digest cranev1.Hash, platform cranev1.Platform) (registryClient.ImageDetails, error) {

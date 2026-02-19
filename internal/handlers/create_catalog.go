@@ -43,6 +43,7 @@ type CreateCatalogHandler struct {
 	k8sClient             client.Client
 	scheme                *runtime.Scheme
 	publisher             messaging.Publisher
+	installationNamespace string
 	logger                *slog.Logger
 }
 
@@ -52,6 +53,7 @@ func NewCreateCatalogHandler(
 	k8sClient client.Client,
 	scheme *runtime.Scheme,
 	publisher messaging.Publisher,
+	installationNamespace string,
 	logger *slog.Logger,
 ) *CreateCatalogHandler {
 	return &CreateCatalogHandler{
@@ -59,6 +61,7 @@ func NewCreateCatalogHandler(
 		k8sClient:             k8sClient,
 		publisher:             publisher,
 		scheme:                scheme,
+		installationNamespace: installationNamespace,
 		logger:                logger.With("handler", "create_catalog_handler"),
 	}
 }
@@ -126,7 +129,7 @@ func (h *CreateCatalogHandler) Handle(ctx context.Context, message messaging.Mes
 	// authentication to get access to the registry
 	if registry.IsPrivate() {
 		var dockerConfig string
-		dockerConfig, err = dockerauth.BuildDockerConfigForRegistry(ctx, h.k8sClient, registry)
+		dockerConfig, err = dockerauth.BuildDockerConfigForRegistry(ctx, h.k8sClient, registry, h.installationNamespace)
 		if err != nil {
 			return fmt.Errorf("cannot setup docker auth: %w", err)
 		}
@@ -187,8 +190,8 @@ func (h *CreateCatalogHandler) Handle(ctx context.Context, message messaging.Mes
 			return fmt.Errorf("cannot parse image reference %q: %w", newImageName, err)
 		}
 
-		matchConditions := registry.GetMatchConditionsByRepository(ref.Context().RepositoryStr())
-		tagIsAllowed, err := filters.FilterByTag(tagEvaluator, matchConditions, ref.Identifier())
+		repository := registry.GetRepository(ref.Context().RepositoryStr())
+		tagIsAllowed, err := filters.FilterByTag(tagEvaluator, repository, ref.Identifier())
 		if err != nil {
 			return fmt.Errorf("cannot evaluate image tag for %q: %w", newImageName, err)
 		}
@@ -599,14 +602,19 @@ func imageDetailsToImage(
 		layerCounter++
 	}
 
+	labels := map[string]string{
+		api.LabelManagedByKey: api.LabelManagedByValue,
+		api.LabelPartOfKey:    api.LabelPartOfValue,
+	}
+	if registry.Labels[api.LabelWorkloadScanKey] == api.LabelWorkloadScanValue {
+		labels[api.LabelWorkloadScanKey] = api.LabelWorkloadScanValue
+	}
+
 	image := storagev1alpha1.Image{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      computeImageUID(ref.Context().Name(), ref.Identifier(), details.Digest.String()),
 			Namespace: registry.Namespace,
-			Labels: map[string]string{
-				api.LabelManagedByKey: api.LabelManagedByValue,
-				api.LabelPartOfKey:    api.LabelPartOfValue,
-			},
+			Labels:    labels,
 		},
 		ImageMetadata: storagev1alpha1.ImageMetadata{
 			Registry:    registry.Name,

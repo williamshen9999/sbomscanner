@@ -26,7 +26,10 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -44,28 +47,33 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/kubewarden/sbomscanner/api"
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 	"github.com/kubewarden/sbomscanner/api/v1alpha1"
 	"github.com/kubewarden/sbomscanner/internal/cmdutil"
 	"github.com/kubewarden/sbomscanner/internal/controller"
 	"github.com/kubewarden/sbomscanner/internal/messaging"
+	"github.com/kubewarden/sbomscanner/internal/storage"
 	webhookv1alpha1 "github.com/kubewarden/sbomscanner/internal/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
 type Config struct {
-	MetricsAddr          string
-	ProbeAddr            string
-	PprofAddr            string
-	EnableLeaderElection bool
-	SecureMetrics        bool
-	EnableHTTP2          bool
-	NatsURL              string
-	NatsCertFile         string
-	NatsKeyFile          string
-	NatsCAFile           string
-	Init                 bool
-	LogLevel             string
+	MetricsAddr             string
+	ProbeAddr               string
+	PprofAddr               string
+	EnableLeaderElection    bool
+	SecureMetrics           bool
+	EnableHTTP2             bool
+	NatsURL                 string
+	NatsCertFile            string
+	NatsKeyFile             string
+	NatsCAFile              string
+	ServiceAccountNamespace string
+	ServiceAccountName      string
+	Init                    bool
+	LogLevel                string
+	WorkloadScan            bool
 }
 
 func parseFlags() Config {
@@ -86,8 +94,11 @@ func parseFlags() Config {
 	flag.StringVar(&cfg.NatsCertFile, "nats-cert-file", "/nats/tls/tls.crt", "The path to the NATS client certificate.")
 	flag.StringVar(&cfg.NatsKeyFile, "nats-key-file", "/nats/tls/tls.key", "The path to the NATS client key.")
 	flag.StringVar(&cfg.NatsCAFile, "nats-ca-file", "/nats/tls/ca.crt", "The path to the NATS CA certificate.")
+	flag.StringVar(&cfg.ServiceAccountNamespace, "service-account-namespace", "sbomscanner", "The namespace of the service account used by the controller. This is used in validating webhooks.")
+	flag.StringVar(&cfg.ServiceAccountName, "service-account-name", "sbomscanner-controller", "The name of the service account used by the controller. This is used in validating webhooks.")
 	flag.BoolVar(&cfg.Init, "init", false, "Run initialization tasks and exit.")
 	flag.StringVar(&cfg.LogLevel, "log-level", slog.LevelInfo.String(), "Log level")
+	flag.BoolVar(&cfg.WorkloadScan, "workloadscan", true, "Enable workload scan controllers.")
 
 	flag.Parse()
 	return cfg
@@ -203,6 +214,51 @@ func main() {
 		os.Exit(1)
 	}
 
+	cacheByObject := map[client.Object]cache.ByObject{
+		&metav1.PartialObjectMetadata{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: storagev1alpha1.SchemeGroupVersion.String(),
+				Kind:       "VulnerabilityReport",
+			},
+		}: {
+			// Read-only
+			UnsafeDisableDeepCopy: ptr.To(true),
+		},
+		&metav1.PartialObjectMetadata{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: corev1.SchemeGroupVersion.String(),
+				Kind:       "Namespace",
+			},
+		}: {
+			// Read-only
+			UnsafeDisableDeepCopy: ptr.To(true),
+		},
+	}
+
+	if cfg.WorkloadScan {
+		cacheByObject[&storagev1alpha1.Image{}] = cache.ByObject{
+			Label:     labels.SelectorFromSet(labels.Set{api.LabelWorkloadScanKey: api.LabelWorkloadScanValue}),
+			Transform: storage.TransformStripImage,
+		}
+		cacheByObject[&storagev1alpha1.WorkloadScanReport{}] = cache.ByObject{
+			Transform: storage.TransformStripWorkloadScanReport,
+		}
+		cacheByObject[&corev1.Pod{}] = cache.ByObject{
+			Transform: controller.TransformStripPod,
+			// Read-only
+			UnsafeDisableDeepCopy: ptr.To(true),
+		}
+		cacheByObject[&metav1.PartialObjectMetadata{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: appsv1.SchemeGroupVersion.String(),
+				Kind:       "ReplicaSet",
+			},
+		}] = cache.ByObject{
+			// Read-only
+			UnsafeDisableDeepCopy: ptr.To(true),
+		}
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
@@ -224,21 +280,9 @@ func main() {
 		// LeaderElectionReleaseOnCancel: true,
 		Cache: cache.Options{
 			DefaultTransform: cache.TransformStripManagedFields(),
-			ByObject: map[client.Object]cache.ByObject{
-				&metav1.PartialObjectMetadata{
-					TypeMeta: metav1.TypeMeta{
-						APIVersion: storagev1alpha1.SchemeGroupVersion.String(),
-						Kind:       "VulnerabilityReport",
-					},
-				}: {
-					Transform: cache.TransformStripManagedFields(),
-					// Metadata-only watch, skip deep copy since we treat it as read-only.
-					UnsafeDisableDeepCopy: ptr.To(true),
-				},
-			},
+			ByObject:         cacheByObject,
 		},
 		Controller: config.Controller{
-			// ReconciliationTimeout is used as the timeout passed to the context of each Reconcile call.
 			ReconciliationTimeout: 90 * time.Second,
 		},
 	})
@@ -247,12 +291,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = controller.SetupIndexer(signalHandler, mgr); err != nil {
+	if err := controller.SetupIndexer(signalHandler, mgr); err != nil {
 		setupLog.Error(err, "unable to set up indexer")
 		os.Exit(1)
 	}
 
-	if err = (&controller.ScanJobReconciler{
+	if err := (&controller.ScanJobReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		Publisher: publisher,
@@ -261,7 +305,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.VulnerabilityReportReconciler{
+	if err := (&controller.VulnerabilityReportReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
@@ -269,20 +313,42 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.RegistryScanRunner{
+	if err := (&controller.RegistryScanRunner{
 		Client: mgr.GetClient(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create runner", "runner", "RegistryScanRunner")
 		os.Exit(1)
 	}
 
-	if err = webhookv1alpha1.SetupRegistryWebhookWithManager(mgr); err != nil {
+	if cfg.WorkloadScan {
+		if err := (&controller.WorkloadScanReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "WorkloadScan")
+			os.Exit(1)
+		}
+
+		if err := (&controller.ImageWorkloadScanReconciler{
+			Client: mgr.GetClient(),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "ImageWorkloadScan")
+			os.Exit(1)
+		}
+	}
+
+	if err = webhookv1alpha1.SetupRegistryWebhookWithManager(mgr, cfg.ServiceAccountNamespace, cfg.ServiceAccountName); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Registry")
 		os.Exit(1)
 	}
 
 	if err = webhookv1alpha1.SetupScanJobWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "ScanJob")
+		os.Exit(1)
+	}
+
+	if err = webhookv1alpha1.SetupWorkloadScanConfigurationWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "WorkloadScanConfiguration")
 		os.Exit(1)
 	}
 

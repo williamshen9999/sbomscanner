@@ -25,7 +25,7 @@ import (
 	"github.com/kubewarden/sbomscanner/api"
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 	"github.com/kubewarden/sbomscanner/api/v1alpha1"
-	vulnReport "github.com/kubewarden/sbomscanner/internal/handlers/vulnerabilityreport"
+	trivyreport "github.com/kubewarden/sbomscanner/internal/handlers/trivyreport"
 	"github.com/kubewarden/sbomscanner/internal/messaging"
 )
 
@@ -66,7 +66,7 @@ func NewScanSBOMHandler(
 }
 
 // Handle processes the ScanSBOMMessage and scans the specified SBOM resource for vulnerabilities.
-func (h *ScanSBOMHandler) Handle(ctx context.Context, message messaging.Message) error { //nolint:funlen,gocognit
+func (h *ScanSBOMHandler) Handle(ctx context.Context, message messaging.Message) error { //nolint:funlen,gocognit,gocyclo,cyclop // TODO: refactor this function in smaller ones
 	scanSBOMMessage := &ScanSBOMMessage{}
 	if err := json.Unmarshal(message.Data(), scanSBOMMessage); err != nil {
 		return fmt.Errorf("failed to unmarshal scan job message: %w", err)
@@ -101,6 +101,16 @@ func (h *ScanSBOMHandler) Handle(ctx context.Context, message messaging.Message)
 	if scanJob.IsFailed() {
 		h.logger.InfoContext(ctx, "ScanJob is in failed state, stopping SBOM scan", "scanjob", scanJob.Name, "namespace", scanJob.Namespace)
 		return nil
+	}
+
+	// Retrieve the registry from the scan job annotations.
+	registryData, ok := scanJob.Annotations[v1alpha1.AnnotationScanJobRegistryKey]
+	if !ok {
+		return fmt.Errorf("scan job %s/%s does not have a registry annotation", scanJob.Namespace, scanJob.Name)
+	}
+	registry := &v1alpha1.Registry{}
+	if err = json.Unmarshal([]byte(registryData), registry); err != nil {
+		return fmt.Errorf("cannot unmarshal registry data from scan job %s/%s: %w", scanJob.Namespace, scanJob.Name, err)
 	}
 
 	sbom := &storagev1alpha1.SBOM{}
@@ -230,11 +240,11 @@ func (h *ScanSBOMHandler) Handle(ctx context.Context, message messaging.Message)
 		return fmt.Errorf("failed to unmarshal report: %w", err)
 	}
 
-	results, err := vulnReport.NewFromTrivyResults(reportOrig)
+	results, err := trivyreport.NewResultsFromTrivyReport(reportOrig)
 	if err != nil {
 		return fmt.Errorf("failed to convert from trivy results: %w", err)
 	}
-	summary := vulnReport.ComputeSummary(results)
+	summary := storagev1alpha1.NewSummaryFromResults(results)
 
 	vulnerabilityReport := &storagev1alpha1.VulnerabilityReport{
 		ObjectMeta: metav1.ObjectMeta{
@@ -251,6 +261,9 @@ func (h *ScanSBOMHandler) Handle(ctx context.Context, message messaging.Message)
 			v1alpha1.LabelScanJobUIDKey: string(scanJob.UID),
 			api.LabelManagedByKey:       api.LabelManagedByValue,
 			api.LabelPartOfKey:          api.LabelPartOfValue,
+		}
+		if registry.Labels[api.LabelWorkloadScanKey] == api.LabelWorkloadScanValue {
+			vulnerabilityReport.Labels[api.LabelWorkloadScanKey] = api.LabelWorkloadScanValue
 		}
 
 		vulnerabilityReport.ImageMetadata = sbom.GetImageMetadata()

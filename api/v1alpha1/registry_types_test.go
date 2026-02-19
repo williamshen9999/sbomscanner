@@ -5,9 +5,10 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestGetMatchConditionsByRepository(t *testing.T) {
+func TestGetRepository(t *testing.T) {
 	expectedConditions := []MatchCondition{
 		{Name: "tag-latest", Expression: `tag == "latest"`},
 	}
@@ -81,11 +82,12 @@ func TestGetMatchConditionsByRepository(t *testing.T) {
 				},
 			}
 
-			got := registry.GetMatchConditionsByRepository(tt.lookupRepo)
+			got := registry.GetRepository(tt.lookupRepo)
 			if tt.expectMatch {
-				assert.Equal(t, expectedConditions, got)
+				require.NotNil(t, got)
+				assert.Equal(t, expectedConditions, got.MatchConditions)
 			} else {
-				assert.Empty(t, got)
+				assert.Nil(t, got)
 			}
 		})
 	}
