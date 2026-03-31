@@ -6,6 +6,7 @@ require (
 	github.com/aquasecurity/trivy v0.69.2
 	github.com/aquasecurity/trivy-db v0.0.0-20260318025153-32625aa31027
 	github.com/avast/retry-go/v4 v4.7.0
+	github.com/avast/retry-go/v5 v5.0.0
 	github.com/aws/smithy-go v1.24.2
 	github.com/docker/cli v29.3.1+incompatible
 	github.com/docker/go-units v0.5.0
@@ -36,7 +37,7 @@ require (
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-openapi v0.0.0-20260319004828-5883c5ee87b9
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
-	modernc.org/sqlite v1.47.0
+	modernc.org/sqlite v1.48.0
 	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/e2e-framework v0.6.0
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2
@@ -186,8 +187,8 @@ require (
 	github.com/go-chi/chi/v5 v5.2.4 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.6.2 // indirect
-	github.com/go-git/go-git/v5 v5.16.5 // indirect
+	github.com/go-git/go-billy/v5 v5.8.0 // indirect
+	github.com/go-git/go-git/v5 v5.17.1 // indirect
 	github.com/go-gorp/gorp/v3 v3.1.0 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
