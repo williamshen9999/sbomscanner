@@ -6,6 +6,7 @@ require (
 	github.com/aquasecurity/trivy v0.69.3
 	github.com/aquasecurity/trivy-db v0.0.0-20260318025153-32625aa31027
 	github.com/avast/retry-go/v4 v4.7.0
+	github.com/avast/retry-go/v5 v5.0.0
 	github.com/aws/smithy-go v1.24.3
 	github.com/docker/cli v29.4.0+incompatible
 	github.com/docker/go-units v0.5.0
@@ -29,12 +30,12 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/sync v0.20.0
 	golang.org/x/time v0.15.0
-	k8s.io/api v0.35.3
-	k8s.io/apimachinery v0.35.3
-	k8s.io/apiserver v0.35.3
-	k8s.io/client-go v0.35.3
-	k8s.io/code-generator v0.35.3
-	k8s.io/component-base v0.35.3
+	k8s.io/api v0.35.4
+	k8s.io/apimachinery v0.35.4
+	k8s.io/apiserver v0.35.4
+	k8s.io/client-go v0.35.4
+	k8s.io/code-generator v0.35.4
+	k8s.io/component-base v0.35.4
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-openapi v0.0.0-20260330154417-16be699c7b31
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
@@ -474,7 +475,7 @@ require (
 	k8s.io/apiextensions-apiserver v0.35.1 // indirect
 	k8s.io/cli-runtime v0.35.1 // indirect
 	k8s.io/gengo/v2 v2.0.0-20250922181213-ec3ebc5fd46b // indirect
-	k8s.io/kms v0.35.3 // indirect
+	k8s.io/kms v0.35.4 // indirect
 	k8s.io/kubectl v0.35.1 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
