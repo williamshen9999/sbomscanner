@@ -18,8 +18,8 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/nats-io/nats-server/v2 v2.12.8
 	github.com/nats-io/nats.go v1.51.0
-	github.com/onsi/ginkgo/v2 v2.28.2
-	github.com/onsi/gomega v1.39.1
+	github.com/onsi/ginkgo/v2 v2.28.3
+	github.com/onsi/gomega v1.40.0
 	github.com/spdx/tools-golang v0.5.7
 	github.com/stephenafamo/bob v0.42.0
 	github.com/stretchr/testify v1.11.1
@@ -234,7 +234,7 @@ require (
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/licenseclassifier/v2 v2.0.0 // indirect
-	github.com/google/pprof v0.0.0-20260115054156-294ebfa9ad83 // indirect
+	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
 	github.com/googleapis/gax-go/v2 v2.19.0 // indirect
