@@ -90,32 +90,18 @@ func (w *natsWatcher) handleMessage(ctx context.Context, msg *nats.Msg) error {
 	}
 
 	obj := w.store.newFunc()
-	err := json.Unmarshal(payload.Object.Raw, obj)
-	if err != nil {
+	if err := json.Unmarshal(payload.Object.Raw, obj); err != nil {
 		return fmt.Errorf("failed to decode object: %w", err)
 	}
 
-	// NOTE: For deleted events, we broadcast the event without re-fetching the object from the store.
-	// This is because the object was deleted, and we are not able to fetch it again.
-	// The object might not be the complete object, as the transforum function may have been applied.
+	// For deleted events broadcast the payload directly since the store no longer has it.
+	// Otherwise rehydrate fields stripped by the publish-side transform (e.g. SBOM.SPDX) from the store's current state.
 	if payload.EventType != watch.Deleted {
-		metaAccessor, err := meta.Accessor(obj)
+		rehydrated, err := w.rehydrate(ctx, obj)
 		if err != nil {
-			return fmt.Errorf("failed to get meta accessor: %w", err)
+			return err
 		}
-		key := fmt.Sprintf("%s/%s/%s/%s", storagev1alpha1.GroupName, w.resource, metaAccessor.GetNamespace(), metaAccessor.GetName())
-
-		if err := w.store.Get(ctx, key, storage.GetOptions{}, obj); err != nil {
-			if storage.IsNotFound(err) {
-				// Object not found, possibly deleted after the event was sent.
-				w.logger.DebugContext(ctx, "Object not found in store while handling message, skipping",
-					"key", key,
-				)
-
-				return nil
-			}
-			return fmt.Errorf("failed to get object from store while handling message: %w", err)
-		}
+		obj = rehydrated
 	}
 
 	if err := w.watchBroadcaster.Action(payload.EventType, obj); err != nil {
@@ -127,6 +113,43 @@ func (w *natsWatcher) handleMessage(ctx context.Context, msg *nats.Msg) error {
 		"obj", payload.Object,
 	)
 	return nil
+}
+
+// rehydrate returns the stored object matching the payload, or the payload itself when the store does not hold a matching object.
+// Falling back to the payload (rather than dropping the event) keeps downstream watchers like the GC dependency graph builder consistent. The following DELETED event reconciles client state.
+func (w *natsWatcher) rehydrate(ctx context.Context, payloadObj runtime.Object) (runtime.Object, error) {
+	payloadAccessor, err := meta.Accessor(payloadObj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get meta accessor: %w", err)
+	}
+	key := fmt.Sprintf("%s/%s/%s/%s", storagev1alpha1.GroupName, w.resource, payloadAccessor.GetNamespace(), payloadAccessor.GetName())
+
+	fetched := w.store.newFunc()
+	if err := w.store.Get(ctx, key, storage.GetOptions{}, fetched); err != nil {
+		if !storage.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to get object from store while handling message: %w", err)
+		}
+		w.logger.DebugContext(ctx, "Object not found in store while handling message; broadcasting payload",
+			"key", key,
+		)
+		return payloadObj, nil
+	}
+
+	fetchedAccessor, err := meta.Accessor(fetched)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get meta accessor for fetched object: %w", err)
+	}
+	if fetchedAccessor.GetUID() != payloadAccessor.GetUID() {
+		// Same namespace/name, different object: it was deleted and recreated before we got here.
+		w.logger.DebugContext(ctx, "Stored object UID does not match payload; broadcasting payload",
+			"key", key,
+			"payloadUID", payloadAccessor.GetUID(),
+			"storedUID", fetchedAccessor.GetUID(),
+		)
+		return payloadObj, nil
+	}
+
+	return fetched, nil
 }
 
 // natsBroadcaster broadcasts watch events using NATS.

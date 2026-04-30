@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -464,6 +465,115 @@ func (suite *storeTestSuite) TestWatchList() {
 	suite.Require().True(ok)
 	suite.Equal("true", bookmarkObj.Annotations["k8s.io/initial-events-end"])
 	suite.NotEmpty(bookmarkObj.ResourceVersion)
+}
+
+// When a non-Deleted event arrives for an object the store no longer holds, the watcher must still broadcast the payload.
+func (suite *storeTestSuite) TestHandleMessageNotFoundStillBroadcasts() {
+	ctx, cancel := context.WithCancel(suite.T().Context())
+	defer cancel()
+
+	w, err := suite.broadcaster.Watch()
+	suite.Require().NoError(err)
+	defer w.Stop()
+
+	go suite.watcher.Start(ctx)
+	suite.Require().NoError(suite.nc.Flush())
+
+	sbom := &storagev1alpha1.SBOM{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ghost",
+			Namespace: "default",
+		},
+	}
+	sbomBytes, err := json.Marshal(sbom)
+	suite.Require().NoError(err)
+
+	payload, err := json.Marshal(event{
+		EventType: watch.Added,
+		Object:    runtime.RawExtension{Raw: sbomBytes},
+	})
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(suite.nc.Publish("watch.sboms", payload))
+	suite.Require().NoError(suite.nc.Flush())
+
+	events := mustReadEvents(suite.T(), w, 1)
+	suite.Equal(watch.Added, events[0].Type)
+
+	got, ok := events[0].Object.(*storagev1alpha1.SBOM)
+	suite.Require().True(ok)
+	suite.Equal("ghost", got.Name)
+	suite.Equal("default", got.Namespace)
+}
+
+// When the store holds a different object at the same namespace/name, the watcher must broadcast the payload, not the refetched object.
+func (suite *storeTestSuite) TestHandleMessageUIDMismatchBroadcastsPayload() {
+	ctx, cancel := context.WithCancel(suite.T().Context())
+	defer cancel()
+
+	w, err := suite.broadcaster.Watch()
+	suite.Require().NoError(err)
+	defer w.Stop()
+
+	go suite.watcher.Start(ctx)
+	suite.Require().NoError(suite.nc.Flush())
+
+	// Populate the store at default/collide. The stale event published next will carry a different UID for the same namespace/name.
+	storedUID := types.UID("stored-uid")
+	stored := &storagev1alpha1.SBOM{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "collide",
+			Namespace: "default",
+			UID:       storedUID,
+		},
+		SPDX: runtime.RawExtension{Raw: []byte(`{"stored": true}`)},
+	}
+	key := keyPrefix + "/default/collide"
+	err = suite.store.Create(ctx, key, stored, &storagev1alpha1.SBOM{}, 0)
+	suite.Require().NoError(err)
+
+	// Drain the ADDED event produced by the Create above
+	created := mustReadEvents(suite.T(), w, 1)
+	suite.Equal(watch.Added, created[0].Type)
+	createdSBOM, ok := created[0].Object.(*storagev1alpha1.SBOM)
+	suite.Require().True(ok)
+	suite.Equal(storedUID, createdSBOM.UID)
+
+	// Publish a stale ADDED carrying a different UID at the same namespace/name
+	staleUID := types.UID("stale-uid")
+	suite.Require().NotEqual(storedUID, staleUID)
+
+	stale := &storagev1alpha1.SBOM{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "collide",
+			Namespace: "default",
+			UID:       staleUID,
+		},
+	}
+	staleBytes, err := json.Marshal(stale)
+	suite.Require().NoError(err)
+
+	payload, err := json.Marshal(event{
+		EventType: watch.Added,
+		Object:    runtime.RawExtension{Raw: staleBytes},
+	})
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(suite.nc.Publish("watch.sboms", payload))
+	suite.Require().NoError(suite.nc.Flush())
+
+	events := mustReadEvents(suite.T(), w, 1)
+	suite.Equal(watch.Added, events[0].Type)
+
+	got, ok := events[0].Object.(*storagev1alpha1.SBOM)
+	suite.Require().True(ok)
+	suite.Equal(staleUID, got.UID, "expected payload UID, not stored UID")
+
+	// Stored object should still be intact and retrievable with its own UID
+	fetched := &storagev1alpha1.SBOM{}
+	err = suite.store.Get(ctx, key, k8sstorage.GetOptions{}, fetched)
+	suite.Require().NoError(err)
+	suite.Equal(storedUID, fetched.UID)
 }
 
 func (suite *storeTestSuite) TestGetList() {
