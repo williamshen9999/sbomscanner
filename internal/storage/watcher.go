@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/storage"
 	"k8s.io/client-go/tools/cache"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 )
@@ -23,6 +24,13 @@ type event struct {
 	Object    runtime.RawExtension `json:"object"`
 }
 
+// Watcher is a manager.Runnable that requires a synchronous Setup phase before Start.
+// Setup must return nil before Start is invoked; Start then blocks until the context is cancelled.
+type Watcher interface {
+	manager.Runnable
+	Setup(ctx context.Context) error
+}
+
 // natsWatcher subscribes to NATS watch events and broadcasts them locally.
 type natsWatcher struct {
 	nc               *nats.Conn
@@ -31,6 +39,7 @@ type natsWatcher struct {
 	watchBroadcaster *watch.Broadcaster
 	logger           *slog.Logger
 	store            *store
+	sub              *nats.Subscription
 }
 
 func newNatsWatcher(nc *nats.Conn,
@@ -51,8 +60,10 @@ func newNatsWatcher(nc *nats.Conn,
 	}
 }
 
-// Start begins subscribing to NATS messages on the given subject.
-func (w *natsWatcher) Start(ctx context.Context) error {
+// Setup subscribes to the NATS subject and flushes so the server has acknowledged the subscription before returning.
+// Callers can rely on the watcher being ready to receive events once Setup returns nil.
+// Start must be called afterwards to drive the shutdown lifecycle.
+func (w *natsWatcher) Setup(ctx context.Context) error {
 	sub, err := w.nc.Subscribe(w.subject, func(msg *nats.Msg) {
 		if err := w.handleMessage(ctx, msg); err != nil {
 			w.logger.ErrorContext(ctx, "Failed to handle NATS message",
@@ -65,13 +76,30 @@ func (w *natsWatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to NATS subject %s: %w", w.subject, err)
 	}
 
+	// Flush to ensure the server has processed the SUB before we signal readiness.
+	// Without this, messages published immediately after Setup returns could be
+	// routed before the subscription is active on the server side.
+	if err := w.nc.Flush(); err != nil {
+		if err := sub.Unsubscribe(); err != nil {
+			w.logger.ErrorContext(ctx, "Failed to unsubscribe after flush error", "error", err)
+		}
+		return fmt.Errorf("failed to flush NATS subscription for %s: %w", w.subject, err)
+	}
+
+	w.sub = sub
+	return nil
+}
+
+// Start blocks until ctx is cancelled, then unsubscribes from NATS and shuts down the broadcaster.
+// Setup must be called and have returned nil before Start.
+func (w *natsWatcher) Start(ctx context.Context) error {
 	w.logger.InfoContext(ctx, "Watch broadcaster started", "subject", w.subject)
 
 	<-ctx.Done()
 
 	w.logger.InfoContext(ctx, "Shutting down watcher", "subject", w.subject)
 	w.watchBroadcaster.Shutdown()
-	if err := sub.Unsubscribe(); err != nil {
+	if err := w.sub.Unsubscribe(); err != nil {
 		w.logger.ErrorContext(ctx, "Failed to unsubscribe from NATS", "error", err)
 	}
 

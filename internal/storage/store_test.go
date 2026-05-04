@@ -299,6 +299,7 @@ func (suite *storeTestSuite) TestWatchResourceVersionZero() {
 	w, err := suite.store.Watch(suite.T().Context(), key, opts)
 	suite.Require().NoError(err)
 
+	suite.Require().NoError(suite.watcher.Setup(suite.T().Context()))
 	go suite.watcher.Start(suite.T().Context())
 
 	validateDeletion := func(_ context.Context, _ runtime.Object) error {
@@ -340,6 +341,7 @@ func (suite *storeTestSuite) TestWatchSpecificResourceVersion() {
 	w, err := suite.store.Watch(suite.T().Context(), key, opts)
 	suite.Require().NoError(err)
 
+	suite.Require().NoError(suite.watcher.Setup(suite.T().Context()))
 	go suite.watcher.Start(suite.T().Context())
 
 	tryUpdate := func(input runtime.Object, _ k8sstorage.ResponseMeta) (runtime.Object, *uint64, error) {
@@ -398,6 +400,7 @@ func (suite *storeTestSuite) TestWatchWithLabelSelector() {
 	w, err := suite.store.Watch(suite.T().Context(), key, opts)
 	suite.Require().NoError(err)
 
+	suite.Require().NoError(suite.watcher.Setup(suite.T().Context()))
 	go suite.watcher.Start(suite.T().Context())
 
 	events := mustReadEvents(suite.T(), w, 1)
@@ -476,8 +479,8 @@ func (suite *storeTestSuite) TestHandleMessageNotFoundStillBroadcasts() {
 	suite.Require().NoError(err)
 	defer w.Stop()
 
+	suite.Require().NoError(suite.watcher.Setup(ctx))
 	go suite.watcher.Start(ctx)
-	suite.Require().NoError(suite.nc.Flush())
 
 	sbom := &storagev1alpha1.SBOM{
 		ObjectMeta: metav1.ObjectMeta{
@@ -515,8 +518,8 @@ func (suite *storeTestSuite) TestHandleMessageUIDMismatchBroadcastsPayload() {
 	suite.Require().NoError(err)
 	defer w.Stop()
 
+	suite.Require().NoError(suite.watcher.Setup(ctx))
 	go suite.watcher.Start(ctx)
-	suite.Require().NoError(suite.nc.Flush())
 
 	// Populate the store at default/collide. The stale event published next will carry a different UID for the same namespace/name.
 	storedUID := types.UID("stored-uid")

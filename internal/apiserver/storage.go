@@ -21,7 +21,6 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	basecompatibility "k8s.io/component-base/compatibility"
 	baseversion "k8s.io/component-base/version"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/kubewarden/sbomscanner/api/storage/install"
 	"github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
@@ -67,7 +66,7 @@ type StorageAPIServerConfig struct {
 
 type StorageAPIServer struct {
 	db                        *pgxpool.Pool
-	watchers                  []manager.Runnable
+	watchers                  []storage.Watcher
 	logger                    *slog.Logger
 	server                    *genericapiserver.GenericAPIServer
 	dynamicCertKeyPairContent *dynamiccertificates.DynamicCertKeyPairContent
@@ -206,6 +205,12 @@ func (s *StorageAPIServer) Start(ctx context.Context) error {
 
 	s.logger.DebugContext(ctx, "Starting dynamic certificate controller")
 	go s.dynamicCertKeyPairContent.Run(ctx, 1)
+
+	for _, watcher := range s.watchers {
+		if err := watcher.Setup(ctx); err != nil {
+			return fmt.Errorf("error setting up watcher: %w", err)
+		}
+	}
 
 	g, ctx := errgroup.WithContext(ctx)
 	for _, watcher := range s.watchers {
