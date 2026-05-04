@@ -146,6 +146,7 @@ func (suite *workloadScanReportWatcherTestSuite) TestNoMatchingWorkloadScanRepor
 	suite.Require().NoError(err)
 	defer w.Stop()
 
+	suite.Require().NoError(suite.natsWatcher.Setup(ctx))
 	go suite.natsWatcher.Start(ctx)
 
 	watcher := newWorkloadScanReportWatcher(
@@ -156,10 +157,8 @@ func (suite *workloadScanReportWatcherTestSuite) TestNoMatchingWorkloadScanRepor
 		suite.workloadStore,
 		slog.Default(),
 	)
+	suite.Require().NoError(watcher.Setup(ctx))
 	go watcher.Start(ctx)
-
-	// Flush NATS connection to ensure watcher is subscribed before publishing events
-	suite.Require().NoError(suite.nc.Flush())
 
 	vulnReport := storagev1alpha1.VulnerabilityReport{
 		ObjectMeta: metav1.ObjectMeta{
@@ -218,6 +217,7 @@ func (suite *workloadScanReportWatcherTestSuite) TestMultipleWorkloadScanReports
 	suite.Require().NoError(err)
 	defer w.Stop()
 
+	suite.Require().NoError(suite.natsWatcher.Setup(ctx))
 	go suite.natsWatcher.Start(ctx)
 
 	watcher := newWorkloadScanReportWatcher(
@@ -228,10 +228,8 @@ func (suite *workloadScanReportWatcherTestSuite) TestMultipleWorkloadScanReports
 		suite.workloadStore,
 		slog.Default(),
 	)
+	suite.Require().NoError(watcher.Setup(ctx))
 	go watcher.Start(ctx)
-
-	// Flush NATS connection to ensure watcher is subscribed before publishing events
-	suite.Require().NoError(suite.nc.Flush())
 
 	vulnReport := storagev1alpha1.VulnerabilityReport{
 		ObjectMeta: metav1.ObjectMeta{

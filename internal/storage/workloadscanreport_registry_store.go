@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/registry/generic"
 	"k8s.io/apiserver/pkg/registry/generic/registry"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 	"github.com/kubewarden/sbomscanner/internal/storage/repository"
@@ -41,7 +40,7 @@ func NewWorkloadScanReportStore(
 	db *pgxpool.Pool,
 	nc *nats.Conn,
 	logger *slog.Logger,
-) (*registry.Store, []manager.Runnable, error) {
+) (*registry.Store, []Watcher, error) {
 	strategy := newWorkloadScanReportStrategy(scheme)
 
 	newFunc := func() runtime.Object { return &storagev1alpha1.WorkloadScanReport{} }
@@ -92,7 +91,7 @@ func NewWorkloadScanReportStore(
 		return nil, nil, fmt.Errorf("unable to complete store with options: %w", err)
 	}
 
-	return registryStore, []manager.Runnable{natsWatcher, workloadScanReportWatcher}, nil
+	return registryStore, []Watcher{natsWatcher, workloadScanReportWatcher}, nil
 }
 
 type workloadScanReportTableConvertor struct{}

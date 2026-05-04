@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/registry/generic"
 	"k8s.io/apiserver/pkg/registry/generic/registry"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	storagev1alpha1 "github.com/kubewarden/sbomscanner/api/storage/v1alpha1"
 	"github.com/kubewarden/sbomscanner/internal/storage/repository"
@@ -45,7 +44,7 @@ func NewSBOMStore(
 	db *pgxpool.Pool,
 	nc *nats.Conn,
 	logger *slog.Logger,
-) (*registry.Store, []manager.Runnable, error) {
+) (*registry.Store, []Watcher, error) {
 	strategy := newSBOMStrategy(scheme)
 	newFunc := func() runtime.Object { return &storagev1alpha1.SBOM{} }
 	newListFunc := func() runtime.Object { return &storagev1alpha1.SBOMList{} }
@@ -86,7 +85,7 @@ func NewSBOMStore(
 		return nil, nil, fmt.Errorf("unable to complete store with options: %w", err)
 	}
 
-	return registryStore, []manager.Runnable{natsWatcher}, nil
+	return registryStore, []Watcher{natsWatcher}, nil
 }
 
 type sbomTableConvertor struct{}
