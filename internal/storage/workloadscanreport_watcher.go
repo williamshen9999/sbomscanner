@@ -26,6 +26,7 @@ type WorkloadScanReportWatcher struct {
 	workloadBroadcaster     *natsBroadcaster
 	workloadScanReportStore *store
 	logger                  *slog.Logger
+	sub                     *nats.Subscription
 }
 
 func newWorkloadScanReportWatcher(
@@ -46,8 +47,10 @@ func newWorkloadScanReportWatcher(
 	}
 }
 
-// Start subscribes to VulnerabilityReport events and generates WorkloadScanReport events.
-func (w *WorkloadScanReportWatcher) Start(ctx context.Context) error {
+// Setup subscribes to VulnerabilityReport events and flushes so the server has acknowledged the subscription before returning.
+// Callers can rely on the watcher being ready to receive events once Setup returns nil.
+// Start must be called afterwards to drive the shutdown lifecycle.
+func (w *WorkloadScanReportWatcher) Setup(ctx context.Context) error {
 	subject := "watch." + vulnerabilityReportResourcePluralName
 
 	sub, err := w.nc.Subscribe(subject, func(msg *nats.Msg) {
@@ -62,12 +65,31 @@ func (w *WorkloadScanReportWatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to NATS subject %s: %w", subject, err)
 	}
 
+	// Flush to ensure the server has processed the SUB before we signal readiness.
+	// Without this, messages published immediately after Setup returns could be
+	// routed before the subscription is active on the server side.
+	if err := w.nc.Flush(); err != nil {
+		if err := sub.Unsubscribe(); err != nil {
+			w.logger.ErrorContext(ctx, "Failed to unsubscribe after flush error", "error", err)
+		}
+		return fmt.Errorf("failed to flush NATS subscription for %s: %w", subject, err)
+	}
+
+	w.sub = sub
+	return nil
+}
+
+// Start blocks until ctx is cancelled, then unsubscribes from NATS.
+// Setup must be called and have returned nil before Start.
+func (w *WorkloadScanReportWatcher) Start(ctx context.Context) error {
+	subject := "watch." + vulnerabilityReportResourcePluralName
+
 	w.logger.InfoContext(ctx, "Watcher started", "subject", subject)
 
 	<-ctx.Done()
 
 	w.logger.InfoContext(ctx, "Shutting down watcher", "subject", subject)
-	if err := sub.Unsubscribe(); err != nil {
+	if err := w.sub.Unsubscribe(); err != nil {
 		w.logger.ErrorContext(ctx, "Failed to unsubscribe from NATS", "error", err)
 	}
 
