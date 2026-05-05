@@ -65,6 +65,9 @@
                 }
             }
         },
+        "fullnameOverride": {
+            "type": "string"
+        },
         "global": {
             "type": "object",
             "properties": {
@@ -146,6 +149,9 @@
                     }
                 }
             }
+        },
+        "nameOverride": {
+            "type": "string"
         },
         "nats": {
             "type": "object",
