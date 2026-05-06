@@ -104,7 +104,7 @@ mcp-image:
 	@echo "Built $(REGISTRY)/$(REPO)/mcp:$(TAG)"
 
 .PHONY: generate
-generate: generate-controller generate-storage generate-chart generate-mocks
+generate: generate-controller generate-storage generate-chart generate-mocks generate-docs
 
 .PHONY: generate-controller
 generate-controller: manifests  ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -135,6 +135,10 @@ generate-chart: ## Generate Helm chart values schema.
 .PHONY: generate-mocks
 generate-mocks: ## Generate mocks for testing.
 	$(MOCKERY)
+
+.PHONY: generate-docs
+generate-docs: ## Generate API documentation for CRDs.
+	$(MAKE) -C docs/crds
 
 .PHONY: generate-fixtures
 generate-fixtures: ## Generate test fixtures.

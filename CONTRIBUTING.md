@@ -74,6 +74,8 @@ When you make changes to the CRDs in `/api` or rbac rules annotations, you need 
 make generate
 ```
 
+This will automatically update the API reference documentation in [`docs/crds`](docs/crds/README.md).
+
 ## Writing Tests
 
 **Controller Tests**
