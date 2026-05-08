@@ -7,7 +7,7 @@ require (
 	github.com/aquasecurity/trivy-db v0.0.0-20260429080452-bd11dd425d21
 	github.com/avast/retry-go/v4 v4.7.0
 	github.com/aws/smithy-go v1.25.1
-	github.com/docker/cli v29.4.2+incompatible
+	github.com/docker/cli v29.4.3+incompatible
 	github.com/docker/go-units v0.5.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cel-go v0.28.0
@@ -17,7 +17,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/modelcontextprotocol/go-sdk v1.6.0
 	github.com/nats-io/nats-server/v2 v2.14.0
-	github.com/nats-io/nats.go v1.51.0
+	github.com/nats-io/nats.go v1.52.0
 	github.com/onsi/ginkgo/v2 v2.28.3
 	github.com/onsi/gomega v1.40.0
 	github.com/spdx/tools-golang v0.5.7
