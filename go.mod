@@ -4,10 +4,11 @@ go 1.26.3
 
 require (
 	github.com/aquasecurity/trivy v0.70.0
-	github.com/aquasecurity/trivy-db v0.0.0-20260429080452-bd11dd425d21
+	github.com/aquasecurity/trivy-db v0.0.0-20260512084903-2034dd8c7e69
 	github.com/avast/retry-go/v4 v4.7.0
+	github.com/avast/retry-go/v5 v5.0.0
 	github.com/aws/smithy-go v1.25.1
-	github.com/docker/cli v29.4.3+incompatible
+	github.com/docker/cli v29.5.0+incompatible
 	github.com/docker/go-units v0.5.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cel-go v0.28.1
@@ -36,7 +37,7 @@ require (
 	k8s.io/code-generator v0.35.4
 	k8s.io/component-base v0.35.4
 	k8s.io/klog/v2 v2.140.0
-	k8s.io/kube-openapi v0.0.0-20260509192518-b540ad9def2b
+	k8s.io/kube-openapi v0.0.0-20260512234627-ef417d054102
 	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2
 	modernc.org/sqlite v1.50.1
 	sigs.k8s.io/controller-runtime v0.23.3
