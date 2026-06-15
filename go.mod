@@ -3,7 +3,7 @@ module github.com/kubewarden/sbomscanner
 go 1.26.4
 
 require (
-	github.com/aquasecurity/trivy v0.71.0
+	github.com/aquasecurity/trivy v0.71.1
 	github.com/aquasecurity/trivy-db v0.0.0-20260528104838-11b0c9f9e5e4
 	github.com/avast/retry-go/v4 v4.7.0
 	github.com/docker/cli v29.5.3+incompatible
@@ -17,10 +17,10 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/nats-io/nats-server/v2 v2.14.2
 	github.com/nats-io/nats.go v1.52.0
-	github.com/onsi/ginkgo/v2 v2.29.0
-	github.com/onsi/gomega v1.41.0
+	github.com/onsi/ginkgo/v2 v2.31.0
+	github.com/onsi/gomega v1.42.0
 	github.com/spdx/tools-golang v0.5.7
-	github.com/stephenafamo/bob v0.45.0
+	github.com/stephenafamo/bob v0.46.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
@@ -28,12 +28,12 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/sync v0.21.0
 	golang.org/x/time v0.15.0
-	k8s.io/api v0.36.1
-	k8s.io/apimachinery v0.36.1
-	k8s.io/apiserver v0.36.1
-	k8s.io/client-go v0.36.1
-	k8s.io/code-generator v0.36.1
-	k8s.io/component-base v0.36.1
+	k8s.io/api v0.36.2
+	k8s.io/apimachinery v0.36.2
+	k8s.io/apiserver v0.36.2
+	k8s.io/client-go v0.36.2
+	k8s.io/code-generator v0.36.2
+	k8s.io/component-base v0.36.2
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-openapi v0.0.0-20260603220949-865597e52e25
 	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2
@@ -469,9 +469,9 @@ require (
 	k8s.io/apiextensions-apiserver v0.36.1 // indirect
 	k8s.io/cli-runtime v0.36.1 // indirect
 	k8s.io/gengo/v2 v2.0.0-20250922181213-ec3ebc5fd46b // indirect
-	k8s.io/kms v0.36.1 // indirect
+	k8s.io/kms v0.36.2 // indirect
 	k8s.io/kubectl v0.36.1 // indirect
-	k8s.io/streaming v0.36.1 // indirect
+	k8s.io/streaming v0.36.2 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
