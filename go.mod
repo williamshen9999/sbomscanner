@@ -9,7 +9,7 @@ require (
 	github.com/docker/cli v29.6.1+incompatible
 	github.com/docker/go-units v0.5.0
 	github.com/go-logr/logr v1.4.3
-	github.com/google/cel-go v0.29.1
+	github.com/google/cel-go v0.29.2
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-containerregistry v0.21.7
 	github.com/google/uuid v1.6.0
@@ -36,11 +36,11 @@ require (
 	k8s.io/component-base v0.36.2
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-openapi v0.0.0-20260706235625-cdb1db5517a0
-	k8s.io/utils v0.0.0-20260626114624-be93311217bd
+	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3
 	modernc.org/sqlite v1.53.0
 	sigs.k8s.io/controller-runtime v0.24.1
 	sigs.k8s.io/e2e-framework v0.7.0
-	sigs.k8s.io/structured-merge-diff/v6 v6.4.1
+	sigs.k8s.io/structured-merge-diff/v6 v6.4.2
 )
 
 require (
